@@ -298,7 +298,7 @@ class Experiment:
         keys = jax.tree_unflatten(treedef, jax.random.split(param_rng, treedef.num_leaves))
 
         # Generate noise
-        noise = jax.tree_map(lambda k, s: jax.random.normal(k, s), keys, shapes)
+        noise = jax.tree_map(lambda k, p: jax.random.normal(k, p.shape), keys, params)
         scaled_noise = jax.tree_map(lambda x: x * noise_std, noise)
 
         # Antithetic sampling
