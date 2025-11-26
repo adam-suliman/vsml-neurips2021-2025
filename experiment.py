@@ -1,6 +1,7 @@
 import os
 import functools
 import haiku as hk
+hk.vmap.require_split_rng = False
 import jax
 import pickle
 import pandas as pd
@@ -152,8 +153,8 @@ class Experiment:
         assert loss.shape == images.shape[:2]
         assert correct.shape == images.shape[:2]
 
-        all_loss, token = mpi4jax.gather(loss, root=0, comm=self.comm)
-        all_correct, token = mpi4jax.gather(correct, root=0, comm=self.comm, token=token)
+        all_loss = mpi4jax.gather(loss, root=0, comm=self.comm)
+        all_correct = mpi4jax.gather(correct, root=0, comm=self.comm)
 
         if self.rank == 0:
             all_loss = all_loss.reshape(-1, loss.shape[-1])
@@ -262,7 +263,7 @@ class Experiment:
         loss = jnp.mean(loss, axis=0)
 
         grads = mpiutils.tree_all_reduce(grads, op=MPI.SUM, comm=self.comm)
-        loss, _ = mpi4jax.allreduce(loss, op=MPI.SUM, comm=self.comm)
+        loss = mpi4jax.allreduce(loss, op=MPI.SUM, comm=self.comm)
         return grads, loss
 
     def _update_func(self, params, opt_state, global_step, images, labels, rng):
@@ -297,12 +298,12 @@ class Experiment:
         keys = jax.tree_unflatten(treedef, jax.random.split(param_rng, treedef.num_leaves))
 
         # Generate noise
-        noise = jax.tree_multimap(jax.random.normal, keys, shapes)
+        noise = jax.tree_map(lambda k, s: jax.random.normal(k, s), keys, shapes)
         scaled_noise = jax.tree_map(lambda x: x * noise_std, noise)
 
         # Antithetic sampling
-        params_pos = jax.tree_multimap(jnp.add, params, scaled_noise)
-        params_neg = jax.tree_multimap(jnp.subtract, params, scaled_noise)
+        params_pos = jax.tree_map(jnp.add, params, scaled_noise)
+        params_neg = jax.tree_map(jnp.subtract, params, scaled_noise)
 
         # TODO Multiple evaluations via vmap
         loss_pos = self._outer_loss(params_pos, images, labels, rng)
@@ -327,6 +328,6 @@ class Experiment:
         loss = jnp.mean(loss, axis=0)
 
         grads = mpiutils.tree_all_reduce(grads, op=MPI.SUM, comm=self.comm)
-        loss, _ = mpi4jax.allreduce(loss, op=MPI.SUM, comm=self.comm)
+        loss = mpi4jax.allreduce(loss, op=MPI.SUM, comm=self.comm)
 
         return grads, loss

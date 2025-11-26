@@ -20,20 +20,12 @@ def only_rank(target_rank: int):
 
 
 def tree_all_reduce(tree, comm, **kwargs):
-    token = jax.lax.create_token()
-
     def reduce_leaf_func(leaf):
-        nonlocal token
-        res, token = mpi4jax.allreduce(leaf, token=token, **kwargs)
-        return res
+        return mpi4jax.allreduce(leaf, **kwargs)
     return jax.tree_map(reduce_leaf_func, tree)
 
 
 def tree_bcast(tree, comm, **kwargs):
-    token = jax.lax.create_token()
-
     def reduce_leaf_func(leaf):
-        nonlocal token
-        res, token = mpi4jax.bcast(leaf, token=token, **kwargs)
-        return res
+        return mpi4jax.bcast(leaf, **kwargs)
     return jax.tree_map(reduce_leaf_func, tree)
