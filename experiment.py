@@ -117,10 +117,10 @@ class Experiment:
             if self.rank == 0:
                 df = self._create_eval_dataframe(vloss, vaccuracy)
                 dfs.append(df)
-                log[f'eval_loss_{name}'] = np.asscalar(loss)
-                log[f'eval_accuracy_{name}'] = np.asscalar(accuracy)
-                log[f'eval_final_loss_{name}'] = np.asscalar(final_loss)
-                log[f'eval_final_accuracy_{name}'] = np.asscalar(final_accuracy)
+                log[f'eval_loss_{name}'] = np.asarray(loss).item()
+                log[f'eval_accuracy_{name}'] = np.asarray(accuracy).item()
+                log[f'eval_final_loss_{name}'] = np.asarray(final_loss).item()
+                log[f'eval_final_accuracy_{name}'] = np.asarray(final_accuracy).item()
 
         if self.rank == 0:
             path = os.path.join(wandb.run.dir, 'evaluation.ftr')
@@ -248,7 +248,7 @@ class Experiment:
             labels,
             rng)
 
-        scalars = {k: np.asscalar(v) for k, v in scalars.items()}
+        scalars = {k: np.asarray(v).item() for k, v in scalars.items()}
         return scalars
 
     def _sgd_grads(self, params, images, labels, rng):
