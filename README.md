@@ -19,14 +19,14 @@ pip3 install --upgrade pip wheel setuptools
 pip3 install -r requirements.txt
 ```
 
-Initialize [weights and biases](https://wandb.ai/)
+TensorBoard logs and checkpoints are written to `runs/` by default. Launch TensorBoard in a separate shell to monitor training:
 ```bash
-wandb init
+tensorboard --logdir runs
 ```
 
-Inspect your results at https://wandb.ai/.
-
 ## Run instructions
+
+Add `--logdir /path/to/logs` when invoking `launch.py` to override the default `runs/` location for TensorBoard logs and checkpoints.
 
 ### Non distributed
 

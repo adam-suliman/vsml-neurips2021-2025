@@ -19,4 +19,4 @@ evaluation:
 
 checkpoint:
   restore:
-    run_path: null
+    path: null

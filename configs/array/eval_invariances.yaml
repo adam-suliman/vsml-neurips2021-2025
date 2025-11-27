@@ -9,8 +9,8 @@ grid:
             - fashion_mnist
         checkpoint:
           restore:
-            # TODO insert wandb_path here, train via configs/invariances.yaml
-            run_path: 'entity/project/id'
+            # TODO insert checkpoint path here, train via configs/invariances.yaml
+            path: '/path/to/checkpoint/or/run'
       tags: [evaluate, invariances]
   - - config:
         data:

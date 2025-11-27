@@ -1,14 +1,16 @@
-import wandb
 import mpi4py.MPI as MPI
 import yaml
 import logging
 import os
+import shutil
+import time
 import config
 import numpy as np
 import tensorflow as tf
+import tb_logger
 
 from experiment import Experiment
-from config import expand_dot_items, WandbMockConfig, WandbMockSummary, flatten_dot_items, DotDict, GLOBAL_CONFIG
+from config import expand_dot_items, flatten_dot_items, DotDict, GLOBAL_CONFIG
 
 
 def _warn_new_keys(config, existing_config):
@@ -36,15 +38,46 @@ def _merge_config(config, config_files, task_config=None):
     return derived_config
 
 
-def _sync_config(comm, mpi_rank):
-    config = wandb.config._items if mpi_rank == 0 else None
-    config = comm.bcast(config, root=0)
-    if mpi_rank > 0:
-        # Create mock wandb objects because we didnt initialize wandb in this process
-        wandb.config = WandbMockConfig(config)
-        wandb.summary = WandbMockSummary()
-        wandb.log = lambda *args, **kwargs: None
-    return config
+def _create_run_name(tags):
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    if tags:
+        clean_tags = [t.replace(os.sep, '_').replace(' ', '_') for t in tags[:3]]
+        tag_suffix = "-".join(clean_tags)
+        return f"{timestamp}-{tag_suffix}"
+    return timestamp
+
+
+def _prepare_log_dir(base_dir, tags):
+    log_root = base_dir or 'runs'
+    run_name = _create_run_name(tags)
+    log_dir = os.path.join(log_root, run_name)
+    os.makedirs(log_dir, exist_ok=True)
+    return log_dir
+
+
+def _save_slurm_metadata(log_dir):
+    if 'SLURM_JOB_ID' not in os.environ:
+        return
+    os.makedirs(log_dir, exist_ok=True)
+    if 'SLURM_ARRAY_JOB_ID' in os.environ:
+        job_id = f"{os.environ['SLURM_ARRAY_JOB_ID']}_{os.environ.get('SLURM_ARRAY_TASK_ID', '0')}"
+    else:
+        job_id = os.environ['SLURM_JOB_ID']
+    meta_path = os.path.join(log_dir, 'slurm_job.txt')
+    with open(meta_path, mode='w') as f:
+        f.write(f"{job_id}\n")
+    log_src = f'slurm-{job_id}.out'
+    if os.path.exists(log_src):
+        log_dst = os.path.join(log_dir, f'slurm-{job_id}.txt')
+        if not os.path.exists(log_dst):
+            try:
+                os.link('./' + log_src, log_dst)
+            except OSError:
+                shutil.copy(log_src, log_dst)
+
+
+def _sync_config(comm, mpi_rank, config):
+    return comm.bcast(config if mpi_rank == 0 else None, root=0)
 
 
 def _update_ranked_config(config: dict, mpi_rank: int):
@@ -58,22 +91,6 @@ def _update_ranked_config(config: dict, mpi_rank: int):
         config[base_key] = selected_option
         del config[k]
     return config
-
-
-def _save_log_to_wandb():
-    if 'SLURM_JOB_ID' in os.environ:
-        if 'SLURM_ARRAY_JOB_ID' in os.environ:
-            job_id = os.environ['SLURM_ARRAY_JOB_ID'] + '_' + os.environ['SLURM_ARRAY_TASK_ID']
-            wandb.summary.slurm_array_jobid = os.environ['SLURM_ARRAY_JOB_ID']
-        else:
-            job_id = os.environ['SLURM_JOB_ID']
-        wandb.summary.slurm_jobid = job_id
-        log_src = f'slurm-{job_id}.out'
-        log_dst = os.path.join(wandb.run.dir, f'slurm-{job_id}.txt')
-        os.link('./' + log_src, log_dst)
-        wandb.save(log_dst)
-        with open(f'wandb-run-{job_id}', 'a') as f:
-            f.write(f'{wandb.run.id}\n')
 
 
 def _create_array_task(spec, mpi_rank, array_subset):
@@ -148,16 +165,24 @@ def run(args):
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
+    config = None
+    tags = []
+    log_dir = None
     if rank == 0:
         config, tags = _setup_config(rank, args.config, args.config_files, args.array, args.subset)
         tags = tags + args.tags if args.tags else tags
-        wandb.init(config=config, tags=tags, job_type=args.job_type)
-        _save_log_to_wandb()
-        wandb.summary.mpi_size = comm.Get_size()
-    config = _sync_config(comm, rank)
+        config['mpi_size'] = comm.Get_size()
+        log_dir = _prepare_log_dir(args.logdir, tags)
+    config = _sync_config(comm, rank, config)
+    log_dir = comm.bcast(log_dir, root=0)
     config = _update_ranked_config(config, rank)
     config = expand_dot_items(DotDict(config))
+    config.log_dir = log_dir
     GLOBAL_CONFIG.update(config)
+    tb_logger.init(log_dir, enabled=rank == 0)
+    if rank == 0:
+        tb_logger.save_config(config, tags)
+        _save_slurm_metadata(log_dir)
     experiment = Experiment(config)
     entry_fn = getattr(experiment, config.call)
     entry_fn()

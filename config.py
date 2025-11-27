@@ -1,4 +1,3 @@
-import logging
 import argparse
 import ast
 import functools
@@ -40,24 +39,6 @@ def flatten_dot_items(inp: dict):
     return inp
 
 
-class WandbMockConfig(DotDict):
-
-    def update(self, params, allow_val_change=False, **kwargs):
-        super().update(params, **kwargs)
-
-
-class WandbMockSummary:
-
-    def update(self, *args):
-        logging.debug(f'Non grouped run, can not write summary {args}')
-
-    def __setattr__(self, key, value):
-        logging.debug(f'Non grouped run, can not write summary {key} = {value}')
-
-    def __setitem__(self, key, value):
-        logging.debug(f'Non grouped run, can not write summary {key} = {value}')
-
-
 _PARSE_PREFIXES = ('[', '(', '-', '+', 'False', 'True') + tuple(str(n) for n in range(10))
 
 
@@ -81,6 +62,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--tags', action='store', nargs='+', type=str)
     parser.add_argument('--job_type', action='store', type=str)
+    parser.add_argument('--logdir', action='store', type=str, default='runs',
+                        help='Base directory for TensorBoard logs and checkpoints')
     parser.add_argument('--array', action='store', type=str)
     parser.add_argument('--subset', action='store', nargs='+', type=int)
     parser.add_argument('--config_files', action='store', nargs='+', type=str)

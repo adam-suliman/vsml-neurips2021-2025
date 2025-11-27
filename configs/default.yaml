@@ -8,7 +8,7 @@ checkpoint:
   frequency: 500
   with_step: False
   restore:
-    run_path: null
+    path: null
     file_name: model.chkp
 
 training:

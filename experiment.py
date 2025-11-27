@@ -8,8 +8,8 @@ import pandas as pd
 import jax.numpy as jnp
 import numpy as np
 import optax
-import wandb
 from lazy import lazy
+import tb_logger
 
 from data import DataLoader
 from monitor import Monitor
@@ -42,6 +42,7 @@ class Experiment:
                                       config.data)
 
         self.forward = hk.transform(self._forward_fn)
+        self.log_dir = getattr(config, 'log_dir', os.getcwd())
         self.summary = summary.SummaryLog('experiment')
         self.monitor = Monitor()
 
@@ -56,6 +57,7 @@ class Experiment:
 
         self.restore()
         self._params = mpiutils.tree_bcast(self._params, root=0, comm=self.comm)
+        self._opt_state = mpiutils.tree_bcast(self._opt_state, root=0, comm=self.comm)
 
         optim_type = self.config.optimizer.type
         if optim_type == 'sgd':
@@ -77,11 +79,11 @@ class Experiment:
             self._key, step_key = jax.random.split(self._key)
             scalars = self.step(i, step_key)
             if i % self.config.summary.frequency == 0:
-                summary = dict(optim_step=i, **scalars,
-                               **self.summary.create(1))
+                log_values = dict(optim_step=i, **scalars,
+                                  **self.summary.create(1))
                 if i % self.config.evaluation.frequency == 0:
-                    summary.update(self.evaluate(log_to_wandb=False))
-                wandb.log(summary)
+                    log_values.update(self.evaluate(log_to_tensorboard=False))
+                tb_logger.log_dict(log_values, step=i)
             if (i + 1) % self.config.checkpoint.frequency == 0:
                 if self.config.checkpoint.with_step:
                     self.checkpoint(i + 1)
@@ -103,7 +105,7 @@ class Experiment:
         df = pd.DataFrame(flat_data, columns=column_names)
         return df
 
-    def evaluate(self, log_to_wandb=True):
+    def evaluate(self, log_to_tensorboard=True, step=None):
         log = {}
         dfs = []
         rng = jax.random.PRNGKey(self.config.evaluation.seed)
@@ -123,13 +125,13 @@ class Experiment:
                 log[f'eval_final_accuracy_{name}'] = np.asarray(final_accuracy).item()
 
         if self.rank == 0:
-            path = os.path.join(wandb.run.dir, 'evaluation.ftr')
+            os.makedirs(self.log_dir, exist_ok=True)
+            path = os.path.join(self.log_dir, 'evaluation.ftr')
             df_evaluation = pd.concat(dfs, keys=dataset_names, names=['dataset'])
             df_evaluation.reset_index().to_feather(path)
-            wandb.save(path)
-            if log_to_wandb:
-                log['optim_step'] = 0
-                wandb.log(log)
+            if log_to_tensorboard:
+                log['optim_step'] = step if step is not None else 0
+                tb_logger.log_dict(log, step=step or 0)
 
         return log
 
@@ -217,25 +219,33 @@ class Experiment:
             name = f'model-{step}.chkp'
         else:
             name = 'model.chkp'
-        path = os.path.join(wandb.run.dir, name)
+        os.makedirs(self.log_dir, exist_ok=True)
+        path = os.path.join(self.log_dir, name)
         data = dict(params=self._params, opt_state=self._opt_state)
         with open(path, 'wb') as f:
             pickle.dump(data, f)
-        wandb.save(path)
 
     @configurable('checkpoint.restore')
-    def restore(self, run_path: str, file_name: str):
-        if not run_path:
+    def restore(self, path: str, file_name: str):
+        if not path:
             return
+        checkpoint_path = path
+        if os.path.isdir(checkpoint_path):
+            checkpoint_path = os.path.join(checkpoint_path, file_name)
+
         if self.rank == 0:
-            api = wandb.Api()
-            run = api.run(run_path)
-            run.file(file_name).download(replace=True).close()
-        self.comm.barrier()
-        with open(file_name, 'rb') as fb:
-            data = pickle.load(fb)
-        params = hk.data_structures.merge(self._params, data['params'])
+            with open(checkpoint_path, 'rb') as fb:
+                data = pickle.load(fb)
+            params = hk.data_structures.merge(self._params, data['params'])
+            opt_state = data.get('opt_state', self._opt_state)
+        else:
+            params = None
+            opt_state = None
+
+        params = mpiutils.tree_bcast(params, root=0, comm=self.comm)
+        opt_state = mpiutils.tree_bcast(opt_state, root=0, comm=self.comm)
         self._params = params
+        self._opt_state = opt_state
 
     def step(self, global_step, rng):
         images, labels = next(self._train_input)

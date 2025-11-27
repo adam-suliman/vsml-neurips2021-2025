@@ -1,14 +1,14 @@
-import wandb
 import time
 from contextlib import contextmanager
 import numpy as np
+import tb_logger
 
 
 @contextmanager
-def timeit(key):
+def timeit(key, step=0):
     start_time = time.time()
     yield
-    wandb.summary[key] = time.time() - start_time
+    tb_logger.log_scalar(key, time.time() - start_time, step=step)
 
 
 class SummaryItem:
@@ -80,8 +80,7 @@ class SummaryLog:
         self._data[key] = time.time() - start_time + prev
 
     def hist(self, key, tensor, verbosity=0):
-        tensor = tensor.detach()
-        self[key] = SummaryItem(lambda: wandb.Histogram(tensor.cpu()), verbosity)
+        self[key] = SummaryItem(lambda: tb_logger.Histogram(np.asarray(tensor)), verbosity)
 
 
 def merge_summaries(*summary_logs: SummaryLog):

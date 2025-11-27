@@ -3,7 +3,6 @@ jaxlib
 git+https://github.com/deepmind/dm-haiku
 mpi4py
 mpi4jax
-wandb
 chex
 numpy
 optax

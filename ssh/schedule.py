@@ -66,7 +66,7 @@ assert avail_gpu_count >= gpus_needed, \
 gpu_queue = itertools.chain.from_iterable(itertools.repeat(avail_gpus, args.oversubscribe))
 
 print('Syncing code ...')
-subprocess.call(f"rsync -az --include 'wandb/settings' --exclude-from .gitignore --exclude '.git/' "
+subprocess.call(f"rsync -az --exclude-from .gitignore --exclude '.git/' "
                 f". {args.host}:{code_path}/{name}", shell=True)
 print('Syncing git ...')
 subprocess.call(f"rsync -az --delete .git {args.host}:{code_path}/{proj_dir}", shell=True)
@@ -96,6 +96,4 @@ for a_job in array:
 print('Launching ...')
 subprocess.call(f'ssh {args.host} "cd {code_path}/{name}; '
                 f'ln -s ../.git .git; '
-                f'sed -i \'/^disabled = true/d\' wandb/settings; '
-                f'sed -i \'/^mode = offline/d\' wandb/settings; '
                 f'{remote_command.format(*commands)}"', shell=True)

@@ -14,5 +14,5 @@ evaluation:
 
 checkpoint:
   restore:
-    # TODO insert wandb_path here
-    run_path: 'entity/project/id'
+    # TODO insert path to the checkpoint directory or file to evaluate
+    path: '/path/to/checkpoint/or/run'
